@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoSport AI Scanner - Pro</title>
+    <style>
+        :root {
+            --primary: #2ecc71;
+            --secondary: #3498db;
+            --dark: #2c3e50;
+            --glass: rgba(255, 255, 255, 0.12);
+        }
+
+        body { 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), 
+                        url('https://media.licdn.com/dms/image/v2/D5612AQHPFOMa4s2cAQ/article-cover_image-shrink_600_2000/article-cover_image-shrink_600_2000/0/1731296758555?e=2147483647&v=beta&t=OnEXAbmsrrTELJ2mvO87aeA8VpBYRVU2KAh2irpiR5A');
+            background-size: cover; 
+            background-attachment: fixed; 
+            background-position: center;
+            color: white;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 500px;
+            margin: 20px auto;
+            padding: 25px;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+
+        h1 { margin: 0 0 5px 0; font-size: 1.8rem; letter-spacing: 1px; }
+        .subtitle { font-size: 0.9rem; opacity: 0.8; margin-bottom: 20px; display: block; }
+
+        /* Camera Box */
+        #webcam-container { 
+            margin: 0 auto; 
+            border: 3px solid rgba(255,255,255,0.8); 
+            border-radius: 20px; 
+            overflow: hidden;
+            width: 300px;
+            height: 300px;
+            background: #000;
+            position: relative;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+
+        canvas { width: 100% !important; height: 100% !important; object-fit: cover; }
+
+        /* UI Elements */
+        #label-container { 
+            margin-top: 20px; 
+            font-size: 20px; 
+            font-weight: 700; 
+            background: rgba(46, 204, 113, 0.2);
+            padding: 12px;
+            border-radius: 15px;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+
+        #instruction {
+            margin-top: 12px;
+            font-size: 15px;
+            min-height: 40px;
+            color: #ecf0f1;
+            line-height: 1.4;
+        }
+
+        /* Controls */
+        .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        
+        button { 
+            padding: 14px; 
+            font-size: 16px; 
+            font-weight: bold;
+            color: white; 
+            border: none; 
+            border-radius: 15px; 
+            cursor: pointer; 
+            transition: all 0.3s ease;
+        }
+
+        .btn-start { background: var(--primary); box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3); }
+        .btn-switch { background: var(--secondary); display: none; font-size: 14px; padding: 10px; }
+        
+        button:active { transform: scale(0.95); }
+
+        /* History Tab */
+        .history-box {
+            margin-top: 25px;
+            text-align: left;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 15px;
+        }
+        
+        .history-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px; }
+        
+        #history-list { max-height: 100px; overflow-y: auto; font-size: 13px; }
+        .history-item { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+        /* Mobile specific adjustments */
+        @media (max-width: 400px) {
+            #webcam-container { width: 260px; height: 260px; }
+            h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>♻️ EcoSport AI</h1>
+        <span class="subtitle">Smart Waste Identification System</span>
+        
+        <div class="controls">
+            <button type="button" class="btn-start" id="start-btn" onclick="init()">Launch Camera</button>
+            <button type="button" class="btn-switch" id="switch-btn" onclick="switchCamera()">🔄 Switch Camera</button>
+        </div>
+        
+        <div id="webcam-container"></div>
+        
+        <div id="label-container">Waiting to start...</div>
+        <div id="instruction">Select 'Launch Camera' to begin classification.</div>
+
+        <div class="history-box">
+            <div class="history-title">Classification History</div>
+            <div id="history-list"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        const URL = "https://teachablemachine.withgoogle.com/models/7CXdAGHEX/"; 
+
+        let model, webcam, labelContainer, historyList, instructionContainer, maxPredictions;
+        let lastSpokenTime = 0;
+        let lastDetectedItem = "";
+        let isUsingBackCamera = true;
+
+        const wasteGuide = {
+            "Plastic": "🔵 BLUE BIN: Plastic bottles/containers. Please rinse first.",
+            "Paper": "🔵 BLUE BIN: Newspapers, cardboard, and office paper.",
+            "Metal": "🔘 GREY BIN: Aluminum cans, tin, and clean foil.",
+            "Glass": "🟢 GREEN BIN: Glass jars and bottles only.",
+            "Organic": "🟤 COMPOST: Food scraps, peels, and garden waste.",
+            "Landfill": "⚫ GENERAL WASTE: Non-recyclable items like crisp packets."
+        };
+
+        async function init() {
+            document.getElementById("start-btn").style.display = "none";
+            
+            labelContainer = document.getElementById("label-container");
+            instructionContainer = document.getElementById("instruction");
+            historyList = document.getElementById("history-list");
+            
+            labelContainer.innerHTML = "Initializing AI...";
+
+            try {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                await setupWebcam();
+                document.getElementById("switch-btn").style.display = "block";
+            } catch (e) {
+                labelContainer.innerHTML = "Camera Error";
+                instructionContainer.innerHTML = "Please ensure you have granted camera permissions.";
+            }
+        }
+
+        async function setupWebcam() {
+            // Check if mobile to choose camera
+            const flip = !isUsingBackCamera; 
+            webcam = new tmImage.Webcam(300, 300, flip); 
+            
+            // This part handles back-camera for mobile
+            const constraints = {
+                video: { facingMode: isUsingBackCamera ? "environment" : "user" }
+            };
+
+            await webcam.setup(constraints); 
+            await webcam.play();
+            
+            const container = document.getElementById("webcam-container");
+            container.innerHTML = ""; // Clear old canvas
+            container.appendChild(webcam.canvas);
+            
+            labelContainer.innerHTML = "Scanning Active";
+            window.requestAnimationFrame(loop);
+        }
+
+        async function switchCamera() {
+            isUsingBackCamera = !isUsingBackCamera;
+            if (webcam) {
+                await webcam.stop();
+                await setupWebcam();
+            }
+        }
+
+        async function loop() {
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            
+            let bestPrediction = "";
+            let highestProbability = 0;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                if (prediction[i].probability > highestProbability) {
+                    highestProbability = prediction[i].probability;
+                    bestPrediction = prediction[i].className;
+                }
+            }
+
+            if (highestProbability > 0.85) {
+                labelContainer.innerHTML = `${bestPrediction} (${(highestProbability * 100).toFixed(0)}%)`;
+                instructionContainer.innerHTML = wasteGuide[bestPrediction] || "Classified Object";
+
+                if (highestProbability > 0.95 && bestPrediction !== lastDetectedItem) {
+                    speak(bestPrediction);
+                    addToHistory(bestPrediction);
+                    lastDetectedItem = bestPrediction;
+                }
+            }
+        }
+
+        function addToHistory(item) {
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const entry = document.createElement("div");
+            entry.className = "history-item";
+            entry.innerHTML = `<strong>${time}</strong>: ${item}`;
+            historyList.prepend(entry);
+        }
+
+        function speak(text) {
+            const now = new Date().getTime();
+            if (now - lastSpokenTime > 3000) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0;
+                window.speechSynthesis.speak(utterance);
+                lastSpokenTime = now;
+            }
+        }
+    </script>
+</body>
+</html>
